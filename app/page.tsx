@@ -3,16 +3,24 @@ import { useEffect, useState } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL;
 
+interface EditalData {
+  id: string;
+  titulo: string;
+  objeto: string;
+  orgao: string;
+  cnpjOrgao: string | null;
+  cidade: string | null;
+  estado: string | null;
+  modalidade: string | null;
+  valorEstimado: number | null;
+  dataPublicacao: string | null;
+  dataLimite: string | null;
+  linkEdital: string | null;
+}
+
 interface Edital {
   id: string;
-  edital: {
-    titulo: string;
-    orgao: string;
-    valorEstimado: number | null;
-    dataLimite: string | null;
-    estado: string | null;
-    modalidade: string | null;
-  };
+  edital: EditalData;
   score: number;
   funnelStatus: string;
 }
@@ -21,6 +29,13 @@ interface Stats {
   total: number;
   processados: number;
   novosHoje: number;
+}
+
+interface Documento {
+  id: string;
+  nome: string;
+  url: string;
+  tipo: string | null;
 }
 
 function scoreColor(s: number) {
@@ -34,6 +49,11 @@ function fmt(val: number | null) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 }
 
+function fmtData(val: string | null) {
+  if (!val) return '—';
+  return new Date(val).toLocaleDateString('pt-BR');
+}
+
 export default function Home() {
   const [token, setToken] = useState('');
   const [email, setEmail] = useState('igor@radar.com');
@@ -42,6 +62,11 @@ export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
+
+  const [modalAberto, setModalAberto] = useState(false);
+  const [editalSelecionado, setEditalSelecionado] = useState<EditalData | null>(null);
+  const [documentos, setDocumentos] = useState<Documento[]>([]);
+  const [carregandoDocs, setCarregandoDocs] = useState(false);
 
   async function login() {
     setErro('');
@@ -72,6 +97,31 @@ export default function Home() {
     setStats(s);
   }
 
+  async function abrirEdital(ed: EditalData) {
+    setEditalSelecionado(ed);
+    setModalAberto(true);
+    setDocumentos([]);
+    setCarregandoDocs(true);
+
+    try {
+      const res = await fetch(`${API}/editais/${ed.id}/documentos`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setDocumentos(data.documentos || []);
+    } catch (e) {
+      setDocumentos([]);
+    } finally {
+      setCarregandoDocs(false);
+    }
+  }
+
+  function fecharModal() {
+    setModalAberto(false);
+    setEditalSelecionado(null);
+    setDocumentos([]);
+  }
+
   if (!token) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
       <div style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 32, width: 340 }}>
@@ -91,7 +141,7 @@ export default function Home() {
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
-      <div style={{ width: 200, background: '#131318', borderRight: '1px solid rgba(255,255,255,0.06)', padding: '20px 0', flexShrink: 0 }}>
+      <div style={{ width: 200, background: '#131318', borderRight: '1px solid rgba(255,255,255,0.06)', padding: '20px 0', flexShrink: 0, position: 'relative' }}>
         <div style={{ padding: '0 16px 20px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 12 }}>
           <div style={{ width: 28, height: 28, background: '#7c6ff7', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📡</div>
           <span style={{ fontSize: 13, fontWeight: 700 }}>Radar</span>
@@ -131,7 +181,13 @@ export default function Home() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {editais.map(e => (
-            <div key={e.id} style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '13px 15px' }}>
+            <div
+              key={e.id}
+              onClick={() => abrirEdital(e.edital)}
+              style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '13px 15px', cursor: 'pointer', transition: 'border-color .15s' }}
+              onMouseEnter={ev => (ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)')}
+              onMouseLeave={ev => (ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)')}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, flex: 1, lineHeight: 1.4 }}>{e.edital.titulo}</div>
                 <div style={{ background: `${scoreColor(e.score)}22`, color: scoreColor(e.score), border: `1px solid ${scoreColor(e.score)}44`, borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 800, marginLeft: 10, flexShrink: 0 }}>
@@ -142,13 +198,79 @@ export default function Home() {
                 <span style={{ fontSize: 11, color: '#8888a0' }}>🏛 {e.edital.orgao}</span>
                 <span style={{ fontSize: 11, color: '#8888a0' }}>💰 {fmt(e.edital.valorEstimado)}</span>
                 {e.edital.estado && <span style={{ fontSize: 11, color: '#8888a0' }}>📍 {e.edital.estado}</span>}
-                {e.edital.dataLimite && <span style={{ fontSize: 11, color: '#8888a0' }}>📅 {new Date(e.edital.dataLimite).toLocaleDateString('pt-BR')}</span>}
+                {e.edital.dataLimite && <span style={{ fontSize: 11, color: '#8888a0' }}>📅 {fmtData(e.edital.dataLimite)}</span>}
                 <span style={{ fontSize: 10, background: 'rgba(124,111,247,0.1)', color: '#a89cf9', border: '1px solid rgba(124,111,247,0.25)', borderRadius: 20, padding: '1px 8px' }}>{e.edital.modalidade || 'Pregão'}</span>
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {modalAberto && editalSelecionado && (
+        <div
+          onClick={fecharModal}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
+        >
+          <div
+            onClick={ev => ev.stopPropagation()}
+            style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.11)', borderRadius: 14, width: '100%', maxWidth: 600, maxHeight: '85vh', overflow: 'auto', padding: 24 }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.4 }}>{editalSelecionado.titulo}</div>
+              <button onClick={fecharModal} style={{ background: 'none', border: 'none', color: '#8888a0', fontSize: 20, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>✕</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+              <InfoItem label="Órgão" value={editalSelecionado.orgao} />
+              <InfoItem label="Valor estimado" value={fmt(editalSelecionado.valorEstimado)} />
+              <InfoItem label="Modalidade" value={editalSelecionado.modalidade || '—'} />
+              <InfoItem label="Cidade/UF" value={`${editalSelecionado.cidade || '—'} / ${editalSelecionado.estado || '—'}`} />
+              <InfoItem label="Publicação" value={fmtData(editalSelecionado.dataPublicacao)} />
+              <InfoItem label="Data limite" value={fmtData(editalSelecionado.dataLimite)} />
+            </div>
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#44444e', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Objeto</div>
+            <div style={{ background: '#1a1a20', borderRadius: 8, padding: '12px 14px', fontSize: 13, color: '#8888a0', lineHeight: 1.7, marginBottom: 20, borderLeft: '3px solid #7c6ff7' }}>
+              {editalSelecionado.objeto}
+            </div>
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#44444e', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Documentos e anexos</div>
+
+            {carregandoDocs && <div style={{ fontSize: 12, color: '#8888a0' }}>Buscando documentos no PNCP...</div>}
+
+            {!carregandoDocs && documentos.length === 0 && (
+              <div style={{ fontSize: 12, color: '#8888a0' }}>Nenhum documento disponível para download neste edital.</div>
+            )}
+
+            {!carregandoDocs && documentos.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {documentos.map(doc => (
+                  <a
+                    key={doc.id}
+                    href={doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: '#1a1a20', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', textDecoration: 'none', color: '#eeeef2', fontSize: 12.5 }}
+                  >
+                    <span>📄</span>
+                    <span style={{ flex: 1 }}>{doc.nome}</span>
+                    <span style={{ fontSize: 11, color: '#7c6ff7' }}>Baixar ↓</span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ background: '#1a1a20', borderRadius: 8, padding: '9px 11px' }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: '#44444e', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
