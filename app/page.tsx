@@ -31,6 +31,11 @@ interface Stats {
   novosHoje: number;
 }
 
+interface Perfil {
+  id: string;
+  name: string;
+}
+
 interface Documento {
   id: string;
   nome: string;
@@ -62,6 +67,8 @@ export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
+  const [perfis, setPerfis] = useState<Perfil[]>([]);
+  const [perfilAtivo, setPerfilAtivo] = useState<string | null>(null);
 
   const [modalAberto, setModalAberto] = useState(false);
   const [editalSelecionado, setEditalSelecionado] = useState<EditalData | null>(null);
@@ -80,7 +87,8 @@ export default function Home() {
       if (!res.ok) throw new Error('Credenciais inválidas');
       const data = await res.json();
       setToken(data.access_token);
-      await carregarDados(data.access_token);
+      const listaPerfis = await carregarPerfis(data.access_token);
+      await carregarDados(data.access_token, listaPerfis[0]?.id ?? null);
     } catch (e: any) {
       setErro(e.message);
     } finally {
@@ -88,13 +96,32 @@ export default function Home() {
     }
   }
 
-  async function carregarDados(t: string) {
+  async function carregarPerfis(t: string): Promise<Perfil[]> {
+    try {
+      const res = await fetch(`${API}/perfis`, { headers: { Authorization: `Bearer ${t}` } });
+      const data = await res.json();
+      const lista = Array.isArray(data) ? data : [];
+      setPerfis(lista);
+      if (lista.length > 0) setPerfilAtivo(lista[0].id);
+      return lista;
+    } catch {
+      return [];
+    }
+  }
+
+  async function carregarDados(t: string, pid: string | null) {
+    const url = pid ? `${API}/editais?perfilId=${pid}` : `${API}/editais`;
     const [e, s] = await Promise.all([
-      fetch(`${API}/editais`, { headers: { Authorization: `Bearer ${t}` } }).then(r => r.json()),
+      fetch(url, { headers: { Authorization: `Bearer ${t}` } }).then(r => r.json()),
       fetch(`${API}/editais/stats`, { headers: { Authorization: `Bearer ${t}` } }).then(r => r.json()),
     ]);
     setEditais(Array.isArray(e) ? e : []);
     setStats(s);
+  }
+
+  async function trocarPerfil(pid: string | null) {
+    setPerfilAtivo(pid);
+    await carregarDados(token, pid);
   }
 
   async function abrirEdital(ed: EditalData) {
@@ -172,6 +199,36 @@ export default function Home() {
                 <div style={{ fontSize: 28, fontWeight: 800 }}>{k.val}</div>
               </div>
             ))}
+          </div>
+        )}
+
+        {perfis.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+            {perfis.map(p => (
+              <button
+                key={p.id}
+                onClick={() => trocarPerfil(p.id)}
+                style={{
+                  padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
+                  background: perfilAtivo === p.id ? '#7c6ff7' : 'transparent',
+                  color: perfilAtivo === p.id ? '#fff' : '#8888a0',
+                  borderColor: perfilAtivo === p.id ? '#7c6ff7' : 'rgba(255,255,255,0.12)',
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+            <button
+              onClick={() => trocarPerfil(null)}
+              style={{
+                padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
+                background: perfilAtivo === null ? '#7c6ff7' : 'transparent',
+                color: perfilAtivo === null ? '#fff' : '#8888a0',
+                borderColor: perfilAtivo === null ? '#7c6ff7' : 'rgba(255,255,255,0.12)',
+              }}
+            >
+              Todos
+            </button>
           </div>
         )}
 
