@@ -34,6 +34,8 @@ interface Stats {
 interface Perfil {
   id: string;
   name: string;
+  tagsPos: string[];
+  tagsNeg: string[];
 }
 
 interface Documento {
@@ -69,6 +71,8 @@ export default function Home() {
   const [erro, setErro] = useState('');
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [perfilAtivo, setPerfilAtivo] = useState<string | null>(null);
+  const [pagina, setPagina] = useState<'dashboard' | 'perfis'>('dashboard');
+  const [perfilEdits, setPerfilEdits] = useState<Record<string, { tagsPos: string[]; tagsNeg: string[]; inputPos: string; inputNeg: string; salvando: boolean }>>({});
 
   const [modalAberto, setModalAberto] = useState(false);
   const [editalSelecionado, setEditalSelecionado] = useState<EditalData | null>(null);
@@ -103,6 +107,11 @@ export default function Home() {
       const lista = Array.isArray(data) ? data : [];
       setPerfis(lista);
       if (lista.length > 0) setPerfilAtivo(lista[0].id);
+      const edits: typeof perfilEdits = {};
+      lista.forEach((p: Perfil) => {
+        edits[p.id] = { tagsPos: [...p.tagsPos], tagsNeg: [...p.tagsNeg], inputPos: '', inputNeg: '', salvando: false };
+      });
+      setPerfilEdits(edits);
       return lista;
     } catch {
       return [];
@@ -122,6 +131,47 @@ export default function Home() {
   async function trocarPerfil(pid: string | null) {
     setPerfilAtivo(pid);
     await carregarDados(token, pid);
+  }
+
+  function editPerfil(id: string, patch: Partial<{ tagsPos: string[]; tagsNeg: string[]; inputPos: string; inputNeg: string; salvando: boolean }>) {
+    setPerfilEdits(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
+
+  function adicionarTag(id: string, tipo: 'pos' | 'neg') {
+    const edit = perfilEdits[id];
+    if (!edit) return;
+    const val = tipo === 'pos' ? edit.inputPos.trim() : edit.inputNeg.trim();
+    if (!val) return;
+    if (tipo === 'pos') {
+      if (edit.tagsPos.includes(val)) return;
+      editPerfil(id, { tagsPos: [...edit.tagsPos, val], inputPos: '' });
+    } else {
+      if (edit.tagsNeg.includes(val)) return;
+      editPerfil(id, { tagsNeg: [...edit.tagsNeg, val], inputNeg: '' });
+    }
+  }
+
+  function removerTag(id: string, tipo: 'pos' | 'neg', tag: string) {
+    const edit = perfilEdits[id];
+    if (!edit) return;
+    if (tipo === 'pos') editPerfil(id, { tagsPos: edit.tagsPos.filter(t => t !== tag) });
+    else editPerfil(id, { tagsNeg: edit.tagsNeg.filter(t => t !== tag) });
+  }
+
+  async function salvarPerfil(id: string) {
+    const edit = perfilEdits[id];
+    if (!edit) return;
+    editPerfil(id, { salvando: true });
+    try {
+      await fetch(`${API}/perfis/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tagsPos: edit.tagsPos, tagsNeg: edit.tagsNeg }),
+      });
+      setPerfis(prev => prev.map(p => p.id === id ? { ...p, tagsPos: edit.tagsPos, tagsNeg: edit.tagsNeg } : p));
+    } finally {
+      editPerfil(id, { salvando: false });
+    }
   }
 
   async function abrirEdital(ed: EditalData) {
@@ -173,9 +223,13 @@ export default function Home() {
           <div style={{ width: 28, height: 28, background: '#7c6ff7', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📡</div>
           <span style={{ fontSize: 13, fontWeight: 700 }}>Radar</span>
         </div>
-        {['Dashboard', 'Oportunidades'].map(item => (
-          <div key={item} style={{ padding: '7px 16px', fontSize: 12.5, color: item === 'Dashboard' ? '#a89cf9' : '#8888a0', background: item === 'Dashboard' ? 'rgba(124,111,247,0.1)' : 'none', cursor: 'pointer' }}>
-            {item}
+        {([['dashboard', 'Dashboard'], ['dashboard', 'Oportunidades'], ['perfis', 'Perfis']] as [typeof pagina, string][]).map(([pg, label]) => (
+          <div
+            key={label}
+            onClick={() => setPagina(pg)}
+            style={{ padding: '7px 16px', fontSize: 12.5, cursor: 'pointer', color: pagina === pg && label !== 'Oportunidades' ? '#a89cf9' : '#8888a0', background: pagina === pg && label !== 'Oportunidades' ? 'rgba(124,111,247,0.1)' : 'none' }}
+          >
+            {label}
           </div>
         ))}
         <div style={{ position: 'absolute', bottom: 16, left: 0, width: 200, padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
@@ -185,82 +239,160 @@ export default function Home() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>Dashboard</div>
 
-        {stats && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
-            {[
-              { label: 'Editais no banco', val: stats.total },
-              { label: 'Processados', val: stats.processados },
-              { label: 'Novos hoje', val: stats.novosHoje },
-            ].map(k => (
-              <div key={k.label} style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '16px 18px' }}>
-                <div style={{ fontSize: 11, color: '#8888a0', marginBottom: 8 }}>{k.label}</div>
-                <div style={{ fontSize: 28, fontWeight: 800 }}>{k.val}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {pagina === 'dashboard' && <>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>Dashboard</div>
 
-        {perfis.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-            {perfis.map(p => (
+          {stats && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
+              {[
+                { label: 'Editais no banco', val: stats.total },
+                { label: 'Processados', val: stats.processados },
+                { label: 'Novos hoje', val: stats.novosHoje },
+              ].map(k => (
+                <div key={k.label} style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '16px 18px' }}>
+                  <div style={{ fontSize: 11, color: '#8888a0', marginBottom: 8 }}>{k.label}</div>
+                  <div style={{ fontSize: 28, fontWeight: 800 }}>{k.val}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {perfis.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+              {perfis.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => trocarPerfil(p.id)}
+                  style={{
+                    padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
+                    background: perfilAtivo === p.id ? '#7c6ff7' : 'transparent',
+                    color: perfilAtivo === p.id ? '#fff' : '#8888a0',
+                    borderColor: perfilAtivo === p.id ? '#7c6ff7' : 'rgba(255,255,255,0.12)',
+                  }}
+                >
+                  {p.name}
+                </button>
+              ))}
               <button
-                key={p.id}
-                onClick={() => trocarPerfil(p.id)}
+                onClick={() => trocarPerfil(null)}
                 style={{
                   padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
-                  background: perfilAtivo === p.id ? '#7c6ff7' : 'transparent',
-                  color: perfilAtivo === p.id ? '#fff' : '#8888a0',
-                  borderColor: perfilAtivo === p.id ? '#7c6ff7' : 'rgba(255,255,255,0.12)',
+                  background: perfilAtivo === null ? '#7c6ff7' : 'transparent',
+                  color: perfilAtivo === null ? '#fff' : '#8888a0',
+                  borderColor: perfilAtivo === null ? '#7c6ff7' : 'rgba(255,255,255,0.12)',
                 }}
               >
-                {p.name}
+                Todos
               </button>
-            ))}
-            <button
-              onClick={() => trocarPerfil(null)}
-              style={{
-                padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid',
-                background: perfilAtivo === null ? '#7c6ff7' : 'transparent',
-                color: perfilAtivo === null ? '#fff' : '#8888a0',
-                borderColor: perfilAtivo === null ? '#7c6ff7' : 'rgba(255,255,255,0.12)',
-              }}
-            >
-              Todos
-            </button>
+            </div>
+          )}
+
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+            {editais.length > 0 ? `${editais.length} oportunidades` : 'Carregando...'}
           </div>
-        )}
 
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
-          {editais.length > 0 ? `${editais.length} oportunidades` : 'Carregando...'}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {editais.map(e => (
-            <div
-              key={e.id}
-              onClick={() => abrirEdital(e.edital)}
-              style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '13px 15px', cursor: 'pointer', transition: 'border-color .15s' }}
-              onMouseEnter={ev => (ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)')}
-              onMouseLeave={ev => (ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)')}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, flex: 1, lineHeight: 1.4 }}>{e.edital.titulo}</div>
-                <div style={{ background: `${scoreColor(e.score)}22`, color: scoreColor(e.score), border: `1px solid ${scoreColor(e.score)}44`, borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 800, marginLeft: 10, flexShrink: 0 }}>
-                  {e.score}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {editais.map(e => (
+              <div
+                key={e.id}
+                onClick={() => abrirEdital(e.edital)}
+                style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '13px 15px', cursor: 'pointer', transition: 'border-color .15s' }}
+                onMouseEnter={ev => (ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)')}
+                onMouseLeave={ev => (ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)')}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, flex: 1, lineHeight: 1.4 }}>{e.edital.titulo}</div>
+                  <div style={{ background: `${scoreColor(e.score)}22`, color: scoreColor(e.score), border: `1px solid ${scoreColor(e.score)}44`, borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 800, marginLeft: 10, flexShrink: 0 }}>
+                    {e.score}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: '#8888a0' }}>🏛 {e.edital.orgao}</span>
+                  <span style={{ fontSize: 11, color: '#8888a0' }}>💰 {fmt(e.edital.valorEstimado)}</span>
+                  {e.edital.estado && <span style={{ fontSize: 11, color: '#8888a0' }}>📍 {e.edital.estado}</span>}
+                  {e.edital.dataLimite && <span style={{ fontSize: 11, color: '#8888a0' }}>📅 {fmtData(e.edital.dataLimite)}</span>}
+                  <span style={{ fontSize: 10, background: 'rgba(124,111,247,0.1)', color: '#a89cf9', border: '1px solid rgba(124,111,247,0.25)', borderRadius: 20, padding: '1px 8px' }}>{e.edital.modalidade || 'Pregão'}</span>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, color: '#8888a0' }}>🏛 {e.edital.orgao}</span>
-                <span style={{ fontSize: 11, color: '#8888a0' }}>💰 {fmt(e.edital.valorEstimado)}</span>
-                {e.edital.estado && <span style={{ fontSize: 11, color: '#8888a0' }}>📍 {e.edital.estado}</span>}
-                {e.edital.dataLimite && <span style={{ fontSize: 11, color: '#8888a0' }}>📅 {fmtData(e.edital.dataLimite)}</span>}
-                <span style={{ fontSize: 10, background: 'rgba(124,111,247,0.1)', color: '#a89cf9', border: '1px solid rgba(124,111,247,0.25)', borderRadius: 20, padding: '1px 8px' }}>{e.edital.modalidade || 'Pregão'}</span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>}
+
+        {pagina === 'perfis' && <>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>Gerenciamento de Perfis</div>
+
+          {perfis.length === 0 && (
+            <div style={{ fontSize: 13, color: '#8888a0' }}>Nenhum perfil encontrado.</div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {perfis.map(p => {
+              const edit = perfilEdits[p.id];
+              if (!edit) return null;
+              return (
+                <div key={p.id} style={{ background: '#131318', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: 20 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>{p.name}</div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#1ec98d', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Tags positivas</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {edit.tagsPos.map(tag => (
+                        <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(30,201,141,0.1)', border: '1px solid rgba(30,201,141,0.3)', color: '#1ec98d', borderRadius: 20, padding: '3px 10px', fontSize: 12 }}>
+                          {tag}
+                          <button onClick={() => removerTag(p.id, 'pos', tag)} style={{ background: 'none', border: 'none', color: '#1ec98d', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0, opacity: 0.7 }}>×</button>
+                        </span>
+                      ))}
+                      {edit.tagsPos.length === 0 && <span style={{ fontSize: 12, color: '#44444e' }}>Nenhuma tag</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        value={edit.inputPos}
+                        onChange={ev => editPerfil(p.id, { inputPos: ev.target.value })}
+                        onKeyDown={ev => ev.key === 'Enter' && adicionarTag(p.id, 'pos')}
+                        placeholder="Nova tag positiva..."
+                        style={{ ...tagInputStyle, borderColor: 'rgba(30,201,141,0.3)' }}
+                      />
+                      <button onClick={() => adicionarTag(p.id, 'pos')} style={{ ...tagBtnStyle, background: 'rgba(30,201,141,0.15)', color: '#1ec98d', borderColor: 'rgba(30,201,141,0.3)' }}>+</button>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#f06060', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Tags negativas</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {edit.tagsNeg.map(tag => (
+                        <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(240,96,96,0.1)', border: '1px solid rgba(240,96,96,0.3)', color: '#f06060', borderRadius: 20, padding: '3px 10px', fontSize: 12 }}>
+                          {tag}
+                          <button onClick={() => removerTag(p.id, 'neg', tag)} style={{ background: 'none', border: 'none', color: '#f06060', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0, opacity: 0.7 }}>×</button>
+                        </span>
+                      ))}
+                      {edit.tagsNeg.length === 0 && <span style={{ fontSize: 12, color: '#44444e' }}>Nenhuma tag</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        value={edit.inputNeg}
+                        onChange={ev => editPerfil(p.id, { inputNeg: ev.target.value })}
+                        onKeyDown={ev => ev.key === 'Enter' && adicionarTag(p.id, 'neg')}
+                        placeholder="Nova tag negativa..."
+                        style={{ ...tagInputStyle, borderColor: 'rgba(240,96,96,0.3)' }}
+                      />
+                      <button onClick={() => adicionarTag(p.id, 'neg')} style={{ ...tagBtnStyle, background: 'rgba(240,96,96,0.1)', color: '#f06060', borderColor: 'rgba(240,96,96,0.3)' }}>+</button>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => salvarPerfil(p.id)}
+                    disabled={edit.salvando}
+                    style={{ padding: '7px 20px', background: '#7c6ff7', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: edit.salvando ? 'not-allowed' : 'pointer', opacity: edit.salvando ? 0.7 : 1 }}
+                  >
+                    {edit.salvando ? 'Salvando...' : 'Salvar'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>}
+
       </div>
 
       {modalAberto && editalSelecionado && (
@@ -342,4 +474,15 @@ const btnStyle: React.CSSProperties = {
   width: '100%', marginTop: 16, padding: '9px', background: '#7c6ff7',
   color: '#fff', border: 'none', borderRadius: 8, fontSize: 13,
   fontWeight: 600, cursor: 'pointer',
+};
+
+const tagInputStyle: React.CSSProperties = {
+  flex: 1, padding: '6px 10px', background: '#1a1a20',
+  border: '1px solid', borderRadius: 7,
+  color: '#eeeef2', fontSize: 12, outline: 'none',
+};
+
+const tagBtnStyle: React.CSSProperties = {
+  padding: '6px 12px', borderRadius: 7, border: '1px solid',
+  fontSize: 16, fontWeight: 700, cursor: 'pointer', lineHeight: 1,
 };
